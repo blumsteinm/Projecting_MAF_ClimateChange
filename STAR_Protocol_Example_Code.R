@@ -8,6 +8,9 @@
 ## Example code for projecting allele frequency change at adatptive loci 
 ## under climate change. For complete details on the use and execution
 ## of this methodology, see Blumstein et al. (2020). Current Biology. 
+## Note: this is a small subset of the full dataset used to illustrate
+##       an example script and thus will not perfectly repicate the 
+##       results of the original study
 ##
 ## Inputs: 
 ##      1. 30-year normals climate data for locations of interest (.csv file)
@@ -99,10 +102,11 @@ allele_frequencies <- aggregate(. ~ Population, data = alleles, FUN = freq)
 ## iv. Remove NA columns of unused identifier information 
 allele_frequencies <- allele_frequencies[,colSums(is.na(allele_frequencies))<nrow(allele_frequencies)]
 
-
 ###############################################################################
 ## Step 2: Define the major axes of climate variation using a principle 
 ##         components analysis (PCA) 
+##         **Note: we chose to use PCAs of climatic data rather than the raw
+##         data due to high colinerity amongst variables. 
 ###############################################################################
 
 ## i. Ensure that both climate files have the same population information in the same order
@@ -119,20 +123,91 @@ future_climate_pca <- predict(past_climate_pca, newdata = future_climate[future_
 biplot(past_climate_pca, col = c("black", "steelblue"), xlabs = as.character( past_climate$Population ), xlim = c(-0.5, 0.8), ylim = c(-0.5, 0.8) ) 
 text(future_climate_pca[,1:2], populations,col = "gray80") ## overlay where populations are projected to be in the PC space in 2080
 
+## v. Make dataframe of results from all PCs for past and future climate for use in the CCA
+past_climate_pcs   <- data.frame(Population = past_climate$Population, past_climate_pca$x)
+future_climate_pcs <- data.frame(Population = future_climate$Population, future_climate_pca)
 
+## vi. Update the column names for easy identification of climatic variables
+colnames(past_climate_pcs)[2:ncol(past_climate_pcs)] <- paste0("Climate_", colnames(past_climate_pcs)[2:ncol(past_climate_pcs)] )
+colnames(future_climate_pcs)[2:ncol(future_climate_pcs)] <- paste0("Climate_", colnames(future_climate_pcs)[2:ncol(future_climate_pcs)] )
 
+###############################################################################
+## Step 3: Fit a Canonical Correspondence Analysis (CCA) to distributions of 
+##         current allele frequencies versus climate normals
+###############################################################################
 
+## i. Merge the PC data from the Climate Normals with the allele frequncy data
+##    for use in the CCA model
+cca_data <- merge(allele_frequencies, past_climate_pcs)
 
+## ii. Find the index of the climate data and the 
+climate_index <- grep("Climate", colnames(cca_data))
+allele_index  <- grep("X0", colnames(cca_data))
 
+## ii. Run CCA with past climate normals and current allele frequencies by populations.
+##     CCAs were initially used in community ecology to predict species distributions
+##     against environment, here we swap allele frequncies for speices. 
+cca_all  <- cca(cca_data[,allele_index] ~ ., data = cca_data[,climate_index], permutations = 4000)
+cca_null <- cca(cca_data[,allele_index] ~ 1, data = cca_data, permutations = 4000)
 
+## iii. Drop environmental predictors that are collinear/non-significant via step-wise running model
+revised_cca <- ordistep(cca_null, scope=formula(cca_all), direction = "both")
+revised_cca$anova
 
+###############################################################################
+## Step 4: Assess model fit and accuracy
+##############################################################################
 
+## i. Note that "Total Inertia" is the total variance in allele frequency distributions. "Constrained Inertia" 
+##     is the variance explained by the environmental variables (gradients matrix). The "Proportion" values represent the
+##     percentages of variance of allele frequency distributions explained by Constrained (environmental) and Unconstrained variables. 
+##     Eigenvalues of constrained and unconstrained axes represent the amount of variance explained by each CCA axis 
+print("Our CCA model explains...")
+cat(round(revised_cca$CCA$tot.chi
+          /revised_cca$tot.chi*100), "% of variation in MAF data", "\n")
 
+## ii. Perform significance test to see if our model explains variation in allele frequncies more than expected 
+##    by chance (p = 0.05)
+anova.cca(revised_cca) ##*gives a pseudo-F via permutation
 
+## iii. Visually compare predicted MAFs to actual MAF. Note in this example
+##      some populations are poorly predicted given the limited number of loci
+##      used for sample code. If found in real analysis, should consider dropping
+##      these populations due to poor predictive ability. 
+predict_current <- predict(revised_cca, newdata = future_climate_pcs)
 
+par(mfrow = c(1,1), mar = c(3, 3, 0.1, 0.1), mgp = c(1.5, 0.5, 0))
+plot(NULL, xlim = c(0,0.75), ylim = c(0,0.75), ylab = "Predicted Allele Frequency", xlab = "Actual Allele Frequency")
+for(k in 1:length(populations)){
+  points(predict_current[k,] ~ as.numeric( allele_frequencies[k,2:ncol(allele_frequencies)] ), pch = 16, col = "gray80")
+  m <- lm(predict_current[k,] ~ as.numeric( allele_frequencies[k,2:ncol(allele_frequencies)] ))
+  abline(m, lwd = 2, col = "gray80")
+  text(0.3, 0.75 - (k * 0.02), paste(populations[k], ":", round(summary(m)$r.squared,2)), adj = c(1,0) )
+}
+abline(a = 0, b = 1, lwd = 2)
 
+###############################################################################
+## Step 5: Predict future allele frequencies given climate change using CCA
+##         model and calculate summary statistics 
+###############################################################################
 
+## i. Use the CCA model of MAF predicted by climate PCs to predict MAF under 
+##    future climate 
+MAF_future <- predict(revised_cca, newdata = future_climate_pcs)
 
+## ii. Calculate the difference between current and predicted MAFs
+MAF_Change <- MAF_future - allele_frequencies[2:ncol(allele_frequencies)]
+
+## iii. Calculate the average shift across all loci by population 
+MAF_Change <- rowMeans( abs(MAF_Change) )
+
+## iv. Calculate the number of loci that are missing the minor allele by pop.
+MAF_Missing <- rowSums( ifelse(allele_frequencies[2:ncol(allele_frequencies)] < 0.01, 1, 0) ) / (ncol(allele_frequencies) -1) 
+
+## v. Visualize the results 
+par(mfrow = c(1,2), mar = c(3, 3, 0.1, 0.1), mgp = c(1.5, 0.5, 0))
+plot(MAF_Missing ~ past_climate$Lat, pch = 16, xlab = "Latitude", ylab = "Proportion Loci Missing Minor Allele: Stems", col = "forestgreen")
+plot(MAF_Change  ~ past_climate$Lat, pch = 16, xlab = "Latitude", ylab = "Average Prediced MAF Increase: Stems", col = "steelblue")
 
 
 
