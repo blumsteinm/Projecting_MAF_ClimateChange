@@ -54,7 +54,7 @@ past_climate     <- read.csv("Example_Data/Climate_Normals_1961_1990.csv")
 future_climate   <- read.csv("Example_Data/Climate_Projections_Ensemble2080s.csv")
 population_info  <- read.csv("Example_Data/Population_Information.csv")
 
-## Color Scale
+## Color Palettes
 maxres <- function(alpha){
   alpha <- alpha 
   col_pal <- c(rgb(2, 135, 169, max = 255, alpha = alpha),
@@ -62,6 +62,28 @@ maxres <- function(alpha){
                rgb(243, 241, 209, max = 255, alpha = alpha),
                rgb(254, 147, 91, max = 255, alpha = alpha),
                rgb(240, 104, 75, max = 255, alpha = alpha))
+  return(col_pal)
+}
+long   <- function(alpha){
+  alpha <- alpha 
+  col_pal <- c(rgb(28, 51, 81, max = 255, alpha = alpha), 
+               rgb(28, 76, 81, max = 255, alpha = alpha),
+               rgb(28, 100, 81, max = 255, alpha = alpha),
+               rgb(28, 124, 81, max = 255, alpha = alpha), 
+               rgb(148, 160, 81, max = 255, alpha = alpha),
+               
+               rgb(245, 201, 117, max = 255, alpha = alpha), 
+               rgb(245, 168, 96, max = 255, alpha = alpha),
+               rgb(245, 136, 88, max = 255, alpha = alpha),
+               rgb(245, 94, 74, max = 255, alpha = alpha), 
+               rgb(245, 52, 58, max = 255, alpha = alpha),
+               
+               rgb(180, 46, 65, max = 255, alpha = alpha), 
+               rgb(143, 29, 44, max = 255, alpha = alpha),
+               rgb(90, 20, 42, max = 255, alpha = alpha),
+               rgb(64, 13, 42, max = 255, alpha = alpha), 
+               rgb(20, 10, 37, max = 255, alpha = alpha)
+  )
   return(col_pal)
 }
 ###############################################################################
@@ -131,13 +153,32 @@ past_climate_pca <- prcomp(past_climate[5:ncol(past_climate)], scale = T, center
 future_climate_pca <- predict(past_climate_pca, newdata = future_climate[future_index, 5:ncol(future_climate)])
 
 ## iv. Visualize correlation of variables and PCA
-par(mfrow = c(1, 2), mar = c(2, 2.5, 0.1, 0.1), mgp = c(1.5, 0.5, 0))
+## Set Plotting Parameters
+par(mfrow = c(1, 2), mar = c(2.1, 2.1, 0.1, 0.1), mgp = c(1.5, 0.5, 0))
+
+## Make Correlation Plot
 M <- cor( as.matrix( past_climate[5:ncol(past_climate)] ) )
 corrplot(M, tl.col = "black", tl.cex = 0.6, type = "lower", 
          order = "FPC", las = 3, tl.srt = 45, 
-         col = colorRampPalette( maxres(255) )(10))
-biplot(past_climate_pca, col = c("black", maxres(150)[1]), cex = 0.5, xlabs = as.character( past_climate$Population ), xlim = c(-0.6, 1), ylim = c(-0.6, 0.7) ) 
-text(future_climate_pca[,1:2], populations,col = "gray70", cex = 0.5) ## overlay where populations are projected to be in the PC space in 2080
+         col = rev(colorRampPalette( maxres(255) )(10)))
+
+## Make Biplot
+xlims <- c(-0.5, 0.7)
+ylims <- c(-0.5, 0.5)
+biplot(past_climate_pca, col = c("black", maxres(175)[1]), 
+       cex = 0.8, xlabs = rep("", nrow(past_climate_pca$x)), 
+       xlim = xlims, ylim = ylims, cex.axis = 0.8, mgp = c(1.3, 0.5, 0) ) 
+
+  ## Plot locations of populations in past climate space
+  par(new = T) ## Plot on top of biplot
+  lam   <- past_climate_pca$sdev[1:2] * sqrt(nrow(past_climate_pca$x))
+  x     <-  t(t(past_climate_pca$x[,1:2])       / lam) 
+  plot(x, axes = F, xlab = "", ylab = "", type = "n", xlim = xlims, ylim = ylims)
+  points(x, pch = 16, col = colorRampPalette(long(255))(nrow(x)))
+  
+  ## Plot locations of populations in projected climate space (2080)
+  ratio <- max(c(-6, 6) / range(x[,1]), c(-5, 10)/ range(x[,2])) ## put on same scale
+  points(future_climate_pca[,1:2]/ratio, col = colorRampPalette(long(50), alpha = T)(nrow(x)), pch = 16)
 
 ## v. Make dataframe of results from all PCs for past and future climate for use in the CCA
 past_climate_pcs   <- data.frame(Population = past_climate$Population, past_climate_pca$x)
