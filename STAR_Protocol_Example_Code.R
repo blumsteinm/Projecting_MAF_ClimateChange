@@ -45,6 +45,7 @@ setwd(working_directory)
 library(data.table)
 library(snpStats)
 library(vegan)
+library(corrplot)
 
 ## Load Data
 snps_of_interest <- read.csv("Example_Data/Example_SNPs.csv")
@@ -53,6 +54,16 @@ past_climate     <- read.csv("Example_Data/Climate_Normals_1961_1990.csv")
 future_climate   <- read.csv("Example_Data/Climate_Projections_Ensemble2080s.csv")
 population_info  <- read.csv("Example_Data/Population_Information.csv")
 
+## Color Scale
+maxres <- function(alpha){
+  alpha <- alpha 
+  col_pal <- c(rgb(2, 135, 169, max = 255, alpha = alpha),
+               rgb(127, 211, 194, max = 255, alpha = alpha),
+               rgb(243, 241, 209, max = 255, alpha = alpha),
+               rgb(254, 147, 91, max = 255, alpha = alpha),
+               rgb(240, 104, 75, max = 255, alpha = alpha))
+  return(col_pal)
+}
 ###############################################################################
 ## Step 1: Calculate the Minor Allele Frequency in each population for each
 ##         loci of interest in the genome
@@ -116,12 +127,17 @@ future_index <- which( as.character(future_climate$Population) %in% populations 
 ## ii. Use "prcomp" from the vegan v.2.5-6 pacakge to run PCA on the past climate normals data
 past_climate_pca <- prcomp(past_climate[5:ncol(past_climate)], scale = T, center = T) ## only run on the columns with climate information, not identifier columns
 
-## iii. Use predict to precit the PC values of the future climate data ** the rows must be in the same order as past climate
+## iii. Use predict to predict the PC values of the future climate data ** the rows must be in the same order as past climate
 future_climate_pca <- predict(past_climate_pca, newdata = future_climate[future_index, 5:ncol(future_climate)])
 
-## iv. Visualize PCA
-biplot(past_climate_pca, col = c("black", "steelblue"), xlabs = as.character( past_climate$Population ), xlim = c(-0.5, 0.8), ylim = c(-0.5, 0.8) ) 
-text(future_climate_pca[,1:2], populations,col = "gray80") ## overlay where populations are projected to be in the PC space in 2080
+## iv. Visualize correlation of variables and PCA
+par(mfrow = c(1, 2), mar = c(2, 2.5, 0.1, 0.1), mgp = c(1.5, 0.5, 0))
+M <- cor( as.matrix( past_climate[5:ncol(past_climate)] ) )
+corrplot(M, tl.col = "black", tl.cex = 0.6, type = "lower", 
+         order = "FPC", las = 3, tl.srt = 45, 
+         col = colorRampPalette( maxres(255) )(10))
+biplot(past_climate_pca, col = c("black", maxres(150)[1]), cex = 0.5, xlabs = as.character( past_climate$Population ), xlim = c(-0.6, 1), ylim = c(-0.6, 0.7) ) 
+text(future_climate_pca[,1:2], populations,col = "gray70", cex = 0.5) ## overlay where populations are projected to be in the PC space in 2080
 
 ## v. Make dataframe of results from all PCs for past and future climate for use in the CCA
 past_climate_pcs   <- data.frame(Population = past_climate$Population, past_climate_pca$x)
@@ -175,14 +191,13 @@ anova.cca(revised_cca) ##*gives a pseudo-F via permutation
 ##      used for sample code. If found in real analysis, should consider dropping
 ##      these populations due to poor predictive ability. 
 predict_current <- predict(revised_cca, newdata = future_climate_pcs)
-
 par(mfrow = c(1,1), mar = c(3, 3, 0.1, 0.1), mgp = c(1.5, 0.5, 0))
 plot(NULL, xlim = c(0,0.75), ylim = c(0,0.75), ylab = "Predicted Allele Frequency", xlab = "Actual Allele Frequency")
 for(k in 1:length(populations)){
   points(predict_current[k,] ~ as.numeric( allele_frequencies[k,2:ncol(allele_frequencies)] ), pch = 16, col = "gray80")
   m <- lm(predict_current[k,] ~ as.numeric( allele_frequencies[k,2:ncol(allele_frequencies)] ))
   abline(m, lwd = 2, col = "gray80")
-  text(0.3, 0.75 - (k * 0.02), paste(populations[k], ":", round(summary(m)$r.squared,2)), adj = c(1,0) )
+  text(0.3, 0.75 - (k * 0.02), cex = 0.8, paste(populations[k], ":", round(summary(m)$r.squared,2)), adj = c(1,0) )
 }
 abline(a = 0, b = 1, lwd = 2)
 
@@ -206,8 +221,8 @@ MAF_Missing <- rowSums( ifelse(allele_frequencies[2:ncol(allele_frequencies)] < 
 
 ## v. Visualize the results 
 par(mfrow = c(1,2), mar = c(3, 3, 0.1, 0.1), mgp = c(1.5, 0.5, 0))
-plot(MAF_Missing ~ past_climate$Lat, pch = 16, xlab = "Latitude", ylab = "Proportion Loci Missing Minor Allele: Stems", col = "forestgreen")
-plot(MAF_Change  ~ past_climate$Lat, pch = 16, xlab = "Latitude", ylab = "Average Prediced MAF Increase: Stems", col = "steelblue")
+plot(MAF_Missing ~ past_climate$Lat, pch = 16, xlab = "Latitude", ylab = "Proportion Loci Missing Minor Allele", col = "forestgreen")
+plot(MAF_Change  ~ past_climate$Lat, pch = 16, xlab = "Latitude", ylab = "Average Prediced MAF Change", col = "steelblue")
 
 
 
